@@ -1,5 +1,5 @@
 # Confidence_Interval_Changes_in_Linear_Model
-This repository provides codes for implementing the procedure in the paper "Confidence intervals for multiple change points in linear models with heteroscedastic errors", by Lajos Horvath, Gregory Rice, Yuqian Zhao
+This repository provides codes for implementing the procedure in the paper "Confidence intervals for multiple change points in linear models with heteroscedastic errors", by Lajos Horvath, Gregory Rice, Yuqian Zhao (2025)
 
 R code:
 
