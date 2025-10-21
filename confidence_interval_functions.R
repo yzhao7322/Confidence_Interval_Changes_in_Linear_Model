@@ -51,6 +51,7 @@ resid <- function(dv,indv){
 confi_21 <- function(dv,indv,kappa){
     euc_norm <- function(x){sqrt(sum(x^2))}
     eps = resid(dv,indv)
+    trm = 0.05
     N = dim(indv)[1]
     d = dim(indv)[2]
     zseq = as.matrix(apply(indv, 2, function(x){x*eps}))
@@ -64,6 +65,8 @@ confi_21 <- function(dv,indv,kappa){
          zn[j] = weight*euc_norm(colSums(zseq[1:j,]))
        }
     } 
+    zn[1:(N*trm)] = 0
+    zn[(N-N*trm):N] = 0
     khat = which(zn==max(zn))
     return(khat)
 }
@@ -311,122 +314,270 @@ fit_break_residuals <- function(y, X, breaks_global = integer(0)) {
 
 
 
-greedy_breaks <- function(y, X, kappa,
-                          max_breaks = 10,
-                          min_seg_n = 20,
-                          find_break = confi_21) {
-  N <- length(y)
-  if (N != nrow(X)) stop("y and X must have same number of rows.")
-  segs <- data.frame(start = 1L, end = N)
-  seg_sse <- rss_ols(y, X)
-
-  breaks_global   <- integer(0)   # sorted set (bookkeeping)
-  breaks_sequence <- integer(0)   # discovery order
-
-  # optional: detailed log for each accepted split
-  breaks_info <- data.frame(
-    iter        = integer(0),
-    k_glob      = integer(0),
-    k_loc       = integer(0),
-    start       = integer(0),
-    end         = integer(0),
-    gain        = numeric(0),
-    sse_unsplit = numeric(0),
-    sse_split   = numeric(0)
-  )
-
-  for (iter in seq_len(max_breaks)) {
-    if (nrow(segs) == 0L) break
-
-    proposals <- vector("list", nrow(segs))
-    gains     <- rep(-Inf, nrow(segs))
-
-    for (i in seq_len(nrow(segs))) {
-      a <- segs$start[i]; b <- segs$end[i]
-      n_i <- b - a + 1L
-      if (n_i < 2L * min_seg_n + 1L) next
-
-      y_i <- y[a:b]
-      X_i <- X[a:b, , drop = FALSE]
-
-      k_loc <- suppressWarnings(find_break(y_i, X_i, kappa))
-      if (!is.numeric(k_loc) || length(k_loc) != 1L || is.na(k_loc)) next
-      if (k_loc <= min_seg_n || (n_i - k_loc) <= min_seg_n) next
-
-      sse_unsplit <- if (length(seg_sse) >= i && !is.na(seg_sse[i])) seg_sse[i] else rss_ols(y_i, X_i)
-      sse_split   <- sse_fun(y_i, X_i, breaks_local = k_loc)  # LOCAL break
-      gain <- sse_unsplit - sse_split
-
-      proposals[[i]] <- list(k_loc = k_loc, a = a, b = b,
-                             sse_split = sse_split, sse_unsplit = sse_unsplit)
-      gains[i] <- gain
+greedy_breaks <- function(y, X = NULL, kappa,
+                         max_breaks = 10,
+                         min_seg_n = 20,
+                         find_break = confi_21,
+                         tol = 1e-8,
+                         verbose = TRUE) {
+  
+  n <- length(y)
+  breaks <- integer(0)
+  segments <- list()
+  iteration_info <- list()  # Store iteration information
+  
+  if (verbose) {
+    cat("=== Greedy Breakpoint Detection Algorithm Started ===\n")
+    cat(sprintf("Data length: %d, Maximum breaks: %d, Minimum segment length: %d\n", n, max_breaks, min_seg_n))
+  }
+  
+  # Helper function: validate segment length
+  valid_segment <- function(start, end) {
+    (end - start + 1) >= min_seg_n
+  }
+  
+  # Helper function: find best candidate breakpoint in a segment
+  find_best_candidate <- function(y_seg, X_seg, start_idx, segment_id) {
+    seg_length <- length(y_seg)
+    
+    if (seg_length < 2 * min_seg_n) {
+      if (verbose) cat(sprintf("  Segment %d length %d < 2*%d, cannot split further\n", 
+                              segment_id, seg_length, min_seg_n))
+      return(NULL)
     }
-
-    best_i <- which.max(gains)
-    if (length(best_i) == 0L || !is.finite(gains[best_i]) || gains[best_i] <= 0) break
-
-    pr <- proposals[[best_i]]
-    a <- pr$a; b <- pr$b; k_loc <- pr$k_loc
-    k_glob <- a + k_loc - 1L  # LOCAL -> GLOBAL
-
-    # record in discovery order
-    breaks_sequence <- c(breaks_sequence, k_glob)
-
-    # insert into sorted set
-    breaks_global <- sort(c(breaks_global, k_glob))
-
-    # log details
-    breaks_info <- rbind(breaks_info, data.frame(
-      iter        = iter,
-      k_glob      = k_glob,
-      k_loc       = k_loc,
-      start       = a,
-      end         = b,
-      gain        = gains[best_i],
-      sse_unsplit = pr$sse_unsplit,
-      sse_split   = pr$sse_split
-    ))
-
-    # replace chosen segment with its children
-    left  <- data.frame(start = a,          end = k_glob)
-    right <- data.frame(start = k_glob + 1, end = b)
-
-    if (nrow(segs) == 1L) {
-      segs <- rbind(left, right)
-      seg_sse <- c(
-        rss_ols(y[left$start:left$end],   X[left$start:left$end, , drop = FALSE]),
-        rss_ols(y[right$start:right$end], X[right$start:right$end, , drop = FALSE])
-      )
+    
+    candidate <- find_break(y_seg, X_seg, kappa)
+    
+    if (is.na(candidate)) {
+      if (verbose) cat(sprintf("  Segment %d: No valid breakpoint found\n", segment_id))
+      return(NULL)
+    }
+    
+    left_seg_length <- candidate
+    right_seg_length <- seg_length - candidate
+    
+    if (left_seg_length < min_seg_n || right_seg_length < min_seg_n) {
+      if (verbose) {
+        cat(sprintf("  Segment %d: Candidate %d creates invalid segments (left: %d, right: %d)\n", 
+                   segment_id, candidate, left_seg_length, right_seg_length))
+      }
+      return(NULL)
+    }
+    
+    global_break <- start_idx + candidate - 1
+    if (verbose) {
+      cat(sprintf("  Segment %d: Found candidate %d (global position: %d), left segment: %d, right segment: %d\n", 
+                 segment_id, candidate, global_break, left_seg_length, right_seg_length))
+    }
+    
+    list(break_point = global_break,
+         segment_start = start_idx,
+         segment_end = start_idx + seg_length - 1,
+         local_position = candidate,
+         segment_id = segment_id)
+  }
+  
+  # Step 1: Find first breakpoint
+  if (verbose) cat("\n--- Step 1: Finding initial breakpoint ---\n")
+  first_break <- find_break(y, X, kappa)
+  
+  if (is.na(first_break)) {
+    if (verbose) cat("No initial breakpoint found\n")
+    return(list(breaks = integer(0), 
+                reason = "No initial breakpoint found",
+                iterations = iteration_info))
+  }
+  
+  if (!valid_segment(1, first_break) || !valid_segment(first_break + 1, n)) {
+    if (verbose) {
+      cat(sprintf("Initial breakpoint %d creates invalid segments\n", first_break))
+      cat(sprintf("Left segment length: %d, Right segment length: %d\n", first_break, n - first_break))
+    }
+    return(list(breaks = integer(0), 
+                reason = "Initial breakpoint creates invalid segments",
+                iterations = iteration_info))
+  }
+  
+  breaks <- first_break
+  segments <- list(
+    list(start = 1, end = first_break, id = 1),
+    list(start = first_break + 1, end = n, id = 2)
+  )
+  
+  if (verbose) {
+    cat(sprintf("Found initial breakpoint: %d\n", first_break))
+    cat(sprintf("Current segments: [1, %d], [%d, %d]\n", first_break, first_break + 1, n))
+  }
+  
+  iteration <- 1
+  
+  # Step 2: Iteratively find more breakpoints
+  while (length(breaks) < max_breaks) {
+    if (verbose) cat(sprintf("\n--- Iteration %d: Finding breakpoint %d (current: %d breaks) ---\n", 
+                            iteration, length(breaks) + 1, length(breaks)))
+    
+    best_improvement <- -Inf
+    best_candidate <- NULL
+    best_segment_idx <- NULL
+    candidates_evaluated <- 0
+    valid_candidates <- 0
+    
+    # Evaluate potential breakpoints in all segments
+    for (i in seq_along(segments)) {
+      seg <- segments[[i]]
+      if (verbose) cat(sprintf("Evaluating segment %d: [%d, %d] (length: %d)\n", 
+                              i, seg$start, seg$end, seg$end - seg$start + 1))
+      
+      if (valid_segment(seg$start, seg$end)) {
+        y_seg <- y[seg$start:seg$end]
+        X_seg <- if (!is.null(X)) as.matrix(X[seg$start:seg$end, , drop = FALSE]) else NULL
+        
+        candidate_info <- find_best_candidate(y_seg, X_seg, seg$start, i)
+        candidates_evaluated <- candidates_evaluated + 1
+        
+        if (!is.null(candidate_info)) {
+          valid_candidates <- valid_candidates + 1
+          
+          # Calculate RSS improvement
+          current_rss <- rss(y, X, breaks = breaks)
+          new_breaks <- sort(c(breaks, candidate_info$break_point))
+          new_rss <- rss(y, X, breaks = new_breaks)
+          improvement <- current_rss - new_rss
+          
+          if (verbose) {
+            cat(sprintf("  Candidate %d: RSS improvement = %.6f (current: %.3f, new: %.3f)\n", 
+                       candidate_info$break_point, improvement, current_rss, new_rss))
+          }
+          
+          if (improvement > best_improvement && improvement > tol) {
+            best_improvement <- improvement
+            best_candidate <- candidate_info
+            best_segment_idx <- i
+          }
+        }
+      } else {
+        if (verbose) cat(sprintf("  Segment %d length less than %d, skipping\n", i, min_seg_n))
+      }
+    }
+    
+    # Record iteration information
+    iter_info <- list(
+      iteration = iteration,
+      current_breaks = breaks,
+      segments_evaluated = length(segments),
+      candidates_found = valid_candidates,
+      best_improvement = if (!is.null(best_candidate)) best_improvement else NA,
+      stop_reason = NA
+    )
+    
+    # Check stopping conditions
+    if (is.null(best_candidate)) {
+      stop_reason <- if (valid_candidates == 0) {
+        "All segments cannot find valid breakpoints"
+      } else if (best_improvement <= tol) {
+        sprintf("RSS improvement (%.6f) less than tolerance %.1e", best_improvement, tol)
+      } else {
+        "No valid candidate breakpoints found"
+      }
+      
+      iter_info$stop_reason <- stop_reason
+      iteration_info[[iteration]] <- iter_info
+      
+      if (verbose) {
+        cat(sprintf("\n*** Stopping reason: %s ***\n", stop_reason))
+        cat(sprintf("Evaluated %d segments, found %d valid candidates\n", 
+                   candidates_evaluated, valid_candidates))
+      }
+      break
+    }
+    
+    # Add the best breakpoint
+    breaks <- sort(c(breaks, best_candidate$break_point))
+    
+    # Update segments list
+    seg_to_split <- segments[[best_segment_idx]]
+    new_segments <- list(
+      list(start = seg_to_split$start, end = best_candidate$break_point, 
+           id = length(segments) + 1),
+      list(start = best_candidate$break_point + 1, end = seg_to_split$end, 
+           id = length(segments) + 2)
+    )
+    
+    segments <- c(segments[-best_segment_idx], new_segments)
+    
+    if (verbose) {
+      cat(sprintf(">>> Added breakpoint %d (from segment %d), RSS improvement: %.6f\n", 
+                 best_candidate$break_point, best_segment_idx, best_improvement))
+      cat(sprintf("Current breakpoints: %s\n", paste(sort(breaks), collapse = ", ")))
+    }
+    
+    iter_info$break_added <- best_candidate$break_point
+    iteration_info[[iteration]] <- iter_info
+    iteration <- iteration + 1
+  }
+  
+  # Final results summary
+  if (verbose) {
+    cat("\n=== Algorithm Finished ===\n")
+    cat(sprintf("Breakpoints found: %d/%d\n", length(breaks), max_breaks))
+    cat(sprintf("Final breakpoint positions: %s\n", paste(sort(breaks), collapse = ", ")))
+    
+    if (length(breaks) < max_breaks) {
+      last_iter <- iteration_info[[length(iteration_info)]]
+      cat(sprintf("Stopping reason: %s\n", last_iter$stop_reason))
     } else {
-      segs <- rbind(
-        if (best_i > 1) segs[1:(best_i - 1), , drop = FALSE],
-        left,
-        right,
-        if (best_i < nrow(segs)) segs[(best_i + 1):nrow(segs), , drop = FALSE]
-      )
-      seg_sse <- c(
-        if (best_i > 1) seg_sse[1:(best_i - 1)] else NULL,
-        rss_ols(y[left$start:left$end],   X[left$start:left$end, , drop = FALSE]),
-        rss_ols(y[right$start:right$end], X[right$start:right$end, , drop = FALSE]),
-        if (best_i < length(seg_sse)) seg_sse[(best_i + 1):length(seg_sse)] else NULL
-      )
+      cat("Stopping reason: Reached maximum breakpoint limit\n")
     }
   }
-
-  # For convenience: map each sorted break to the iteration it was found
-  breaks_sorted <- breaks_global
-  breaks_order  <- match(breaks_sorted, breaks_sequence)  # 1 = found first, etc.
-
-  list(
-    breaks        = breaks_sorted,     # sorted (as before)
-    breaks_sequence = breaks_sequence, # discovery order you asked for
-    breaks_order  = breaks_order,      # per 'breaks', which iteration discovered it
-    sse_total     = sse_fun(y, X, breaks_local = breaks_sorted),
-    segments      = segs,
-    breaks_info   = breaks_info        # detailed log (optional but useful)
+  
+  # Return detailed results
+  result <- list(
+    breaks = sort(breaks),
+    total_breaks = length(breaks),
+    max_possible_breaks = max_breaks,
+    stop_reason = if (length(breaks) < max_breaks) {
+      iteration_info[[length(iteration_info)]]$stop_reason
+    } else {
+      "Reached maximum breakpoint limit"
+    },
+    iterations = iteration_info,
+    segments = segments
   )
+  
+  return(result)
 }
- 
+
+# RSS calculation function (English version)
+rss <- function(y, X = NULL, breaks = integer(0)) {
+  n <- length(y)
+  breaks <- sort(breaks)
+  break_points <- c(0, breaks, n)
+  
+  total_rss <- 0
+  for (i in seq_len(length(break_points) - 1)) {
+    start <- break_points[i] + 1
+    end <- break_points[i + 1]
+    y_seg <- y[start:end]
+    
+    if (is.null(X)) {
+      # Simple mean model
+      total_rss <- total_rss + sum((y_seg - mean(y_seg))^2)
+    } else {
+      # Linear regression model
+      X_seg <- as.matrix(X[start:end, , drop = FALSE])
+      if (ncol(X_seg) >= length(y_seg)) {
+        # Not enough observations for regression
+        total_rss <- total_rss + sum((y_seg - mean(y_seg))^2)
+      } else {
+        fit <- lm(y_seg ~ X_seg - 1)  # No intercept if X includes it
+        total_rss <- total_rss + sum(residuals(fit)^2)
+      }
+    }
+  }
+  
+  return(total_rss)
+}
+
 
 combinations_with_anchor <- function(breaks, anchor_idx = 1L, min_k = 1L, max_k = NULL) {
   n <- length(breaks)
@@ -507,25 +658,27 @@ change_point_refinement <- function(y,x,breaks, kappa){
         idx_pairs[[length(idx_pairs) + 1L]] <- c(B[i], B[i + 2L])
       }
     }
-    #   tail windows to N
+    # tail windows to N
     idx_pairs[[length(idx_pairs) + 1L]] <- c(B[length(B) - 2L], B[length(B)])
     idx_pairs[[length(idx_pairs) + 1L]] <- c(B[length(B) - 1L], B[length(B)])
-
+ 
     # build outputs
     starts <- vapply(idx_pairs, `[[`, integer(1), 1L)
     ends   <- vapply(idx_pairs, `[[`, integer(1), 2L)
+    starts <- starts[-length(starts)]
+    ends   <- ends[-length(starts)]
     ys <- mapply(function(a, b) y[a:b], starts, ends, SIMPLIFY = FALSE)
     Xs <- mapply(function(a, b) X[a:b, , drop = FALSE], starts, ends, SIMPLIFY = FALSE)
 
     names(ys) <- names(Xs) <- paste0("seg", seq_along(ys))
     list(bounds = data.frame(start = starts, end = ends), y = ys, x = Xs)
   }
-  
+
   sample_split=split_by_breaks(y,x,breaks)
   
   r = length(breaks)
   refine_br = c()
-  for (i in 1:(r+1)){
+  for (i in 1:(r) ){
     refine_br[i] = confi_21(sample_split$y[[i]], sample_split$x[[i]], kappa)
   }
  

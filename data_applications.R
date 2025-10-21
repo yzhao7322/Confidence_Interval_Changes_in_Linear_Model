@@ -92,35 +92,46 @@ legend("topleft",legend=c("Rolling window estimate of the SD of the residuals"),
 ### K_N^{SMO} method
 y = as.matrix(infla_core_month)
 x = as.matrix(unemploy_month)
-bre_out = greedy_breaks(y, x, kappa=1/2, max_breaks = 10, min_seg_n = 20)
-res_breaks <- combinations_with_anchor(bre_out$breaks_sequence)
+
+# manually
+
+
+# auto
+bre_out = greedy_breaks(y, x, kappa=1/2, max_breaks = 7, min_seg_n = 20)
+bre_out$breaks
+res_breaks <- combinations_with_anchor(bre_out$breaks)
 breaks_out = break_selection(y,x,res_breaks)
 kappa = 1/2 
 N = length(y)
 ### change point refinement
 refined_br = change_point_refinement(y,x,breaks_out, kappa)
 refined_br
-# 170 260 312 723
-# 1975/02, 1982/08, 1986/12, 2021/03
+# 170 260 330 427 
+# 1975/02, 1982/08, 1988/06,  1996/07
 
+###################
+# 711 [2020/03] the break around Covid-19 at was not selected via BIC criteria
+###################
+
+# confidence interval
+set.seed(55)
 ksc_confidence_interval(y, x, refined_br, band_width=floor(sqrt(N)), kappa = 1/2, alpha = 0.95)
 # [[1]]
 # 97.5%  2.5% 
-#   166   184
-# 1974/10 - 1976/04
+#   162   198
+# 1974/6 - 1977/6
 # [[2]]
 # 97.5%  2.5%
-#   253   289
-# 1982/01 - 1985/01
+#   254   283
+# 1982/02 - 1984/7
 # [[3]]
 # 97.5%  2.5%
-#   296   316
-# 1985/08 - 1987/04
+#   307   381
+# 1986/07 - 1992/9
 # [[4]]
 # 97.5%  2.5%
-#   717   762 (capped at 737)
-# 2020/09 - 2022/05
-
+#   424   428
+# 1996/04 - 1996/08
 
 ### BP method
 alpha = 0.95
@@ -157,16 +168,16 @@ ilr.yx
 #  K_N^{SMO}
 col1="gray70"
 plot(infla_core_month,type="l",cex=1.8,col='blue',lwd=3,xaxt="n",ylim=c(-5,15),ylab="",xlab="",main="",cex.main=2.5,cex.axis = 2.5)
-rect(166, -10, 184, 20, border = col1, col = col1)
-rect(253, -10, 289, 20, border = col1, col = col1)
-rect(296, -10, 316, 20, border = col1, col = col1)
-rect(717, -10, 737, 20, border = col1, col = col1)
+rect(162, -10, 198, 20, border = col1, col = col1)
+rect(254, -10, 283, 20, border = col1, col = col1)
+rect(307, -10, 381, 20, border = col1, col = col1)
+rect(424, -10, 428, 20, border = col1, col = col1)
 lines(infla_core_month,type="l",cex=1.8,col='blue',lwd=3)
 axis(1,at=seq(1,737,184),cex.axis=2.2,labels = c("Jan-1961", "May-1976", "Sep-1991", "Jan-2007", "May-2022"))
 lines(unemploy_month,type="l",lwd=3,cex=1.8,col='red')
 lines(resv1,lty=2,cex=2,col='magenta1',lwd=4)
 abline(h=0, col="springgreen4",lwd=2.5,lty=3)
-abline(v=c(170,260,312,723), col="black",lwd=4,lty=1)
+abline(v=c(170,260,330,427), col="black",lwd=4,lty=1)
 legend(x = c(480, 480), y = c(15, 15),legend=c("Inflation","Unemployment","Rolling window SD","Breaks"),lty = c(1,1,1,1),lwd=3, col=c("blue","red","magenta1","black"),cex=1.8,y.intersp=1.2,bty = "n",seg.len=0.5)
  
 # BP
@@ -236,12 +247,12 @@ y1 = infla_core_month[1:170]
 x1 = unemploy_month[1:170] 
 y2 = infla_core_month[171:260]
 x2 = unemploy_month[171:260]
-y3 = infla_core_month[261:312]
-x3 = unemploy_month[261:312] 
-y4 = infla_core_month[313:723]
-x4 = unemploy_month[313:723] 
-y5 = infla_core_month[724:737]
-x5 = unemploy_month[724:737]
+y3 = infla_core_month[261:330]
+x3 = unemploy_month[261:330] 
+y4 = infla_core_month[331:427]
+x4 = unemploy_month[331:427] 
+y5 = infla_core_month[428:737]
+x5 = unemploy_month[428:737]
 
 table2 = matrix(NA, 5, 2)
 table2[1,1] = summary(lm(y1 ~ x1 -1 ))[4]$coefficients[1]
@@ -257,6 +268,12 @@ table2[5,2] = sd(residuals(lm(y5 ~ x5 -1 )))
 round(table2,2)
 
 
+# post-Covid19
+
+y6 = infla_core_month[711:737]
+x6 = unemploy_month[711:737]
+summary(lm(y6 ~ x6 -1 ))[4]$coefficients[1]
+sd(residuals(lm(y6 ~ x6 -1 )))
 
 
 ##################
@@ -264,7 +281,7 @@ round(table2,2)
 ##################
 ########## Cryptocurrency
 crypdat = read.csv("your_working_path\\application2\\crypfactors.csv",header=TRUE)
-
+crypdat = read.csv("E:\\Working projects\\TimeofChange\\tex\\ET_sub\\RR\\code\\github\\crypfactors.csv",header=TRUE)
 xfactor = as.matrix(crypdat[,2:4])
 ydata = as.matrix(crypdat[,5])
 rfdata = as.matrix(crypdat[,6])
@@ -275,7 +292,7 @@ y = as.matrix(yret)
 N = length(y)
 x = as.matrix(cbind(rep(1,N),xfactor))
 bre_out = greedy_breaks(y, x, kappa=1/2, max_breaks = 2, min_seg_n = 20)
-res_breaks <- combinations_with_anchor(bre_out$breaks_sequence)
+res_breaks <- combinations_with_anchor(bre_out$breaks)
 breaks_out = break_selection(y,x,res_breaks)
 kappa = 1/2 
 

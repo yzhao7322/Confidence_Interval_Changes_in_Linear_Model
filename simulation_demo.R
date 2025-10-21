@@ -79,12 +79,13 @@ for (i in 1:reps){
 
     khat = confi_21(y,x,kappa)
     kstar = N1*thetastar
+    Amat <- matrixA(x)
     # if(khat>= (N1*0.95)){khat = N1*0.95} # truncation at 0.05
     # if(khat<= (N1*0.05)){khat = N1*0.05} 
     khat <- pmin(pmax(khat, N1 * 0.05), N1 * 0.95) # truncation at 0.05
     deltahat = ols_e(y[1:khat],x[1:khat,]) - ols_e(y[(khat+1):N1],x[(khat+1):N1,])
     
-    varl=sigma_step_smooth(y,x,khat, deltahat, h_band)
+    varl=sigma_step_smooth(y,x,khat, deltahat, h_band, Amat)
     a_minus = varl[1]
     a_plus = varl[2]
     
