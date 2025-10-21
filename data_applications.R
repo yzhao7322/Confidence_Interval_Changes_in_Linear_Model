@@ -89,7 +89,7 @@ legend("topleft",legend=c("Rolling window estimate of the SD of the residuals"),
 # estimating changes and confidence intervals
 ###############################
 
-### K_N^{SMO} method
+### K_N^{HET} method
 y = as.matrix(infla_core_month)
 x = as.matrix(unemploy_month)
 
@@ -165,7 +165,7 @@ ilr.yx
 
 
 ## plot of change point + confidence interval
-#  K_N^{SMO}
+#  K_N^{HET}
 col1="gray70"
 plot(infla_core_month,type="l",cex=1.8,col='blue',lwd=3,xaxt="n",ylim=c(-5,15),ylab="",xlab="",main="",cex.main=2.5,cex.axis = 2.5)
 rect(162, -10, 198, 20, border = col1, col = col1)
@@ -242,7 +242,7 @@ table2[5,2] = sd(residuals(lm(y5 ~ x5 -1 )))
 round(table2,2)
 
 
-# K_N^{SMO}
+# K_N^{HET}
 y1 = infla_core_month[1:170]
 x1 = unemploy_month[1:170] 
 y2 = infla_core_month[171:260]
@@ -302,7 +302,7 @@ refined_br
 # 196 316 
 # 2017/week 43 , 2020/week 07
 
-# k_N^{(SMO)}(1/2)
+# k_N^{(HET)}(1/2)
 ksc_confidence_interval(y, x, refined_br , band_width=floor(sqrt(N)), kappa = 1/2, alpha = 0.95)
 # [[1]]
 # 97.5%  2.5% 
